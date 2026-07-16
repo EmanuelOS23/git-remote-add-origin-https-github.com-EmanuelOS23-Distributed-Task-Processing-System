@@ -17,33 +17,6 @@ A arquitetura é composta por:
 2. **Worker Service**: Microsserviço independente (consumer) que escuta a fila do RabbitMQ. Ele puxa uma tarefa por vez (`prefetch=1`), processa as regras de negócio em background (simulando processos pesados com chance de falha controlada), atualiza o status no banco e gera auditoria (Logs de Tarefas).
 3. **Shared / Prisma Layer**: Módulos compartilhados encapsulando os esquemas de banco de dados (ORM) e logs distribuídos (Winston).
 
-## 🔄 Fluxo de Processamento
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API_Gateway
-    participant PostgresDB
-    participant RabbitMQ
-    participant Worker
-
-    Client->>API_Gateway: POST /api/tasks (Payload)
-    API_Gateway->>PostgresDB: Insert Task (Status: PENDING)
-    API_Gateway->>RabbitMQ: Publish Event (Task ID)
-    API_Gateway-->>Client: 202 Accepted (Não bloqueante)
-    
-    RabbitMQ-->>Worker: Consume Event (Task ID)
-    Worker->>PostgresDB: Update Status (PROCESSING) + Log
-    Worker->>Worker: Heavy processing simulation...
-    alt Sucesso
-        Worker->>PostgresDB: Update Status (COMPLETED) + Log
-        Worker->>RabbitMQ: Send ACK
-    else Falha
-        Worker->>PostgresDB: Update Status (FAILED) + Log
-        Worker->>RabbitMQ: Send ACK (Para não refazer eternamente)
-    end
-```
-
 ## 🛠 Tecnologias
 
 - **Linguagem**: TypeScript
@@ -56,86 +29,62 @@ sequenceDiagram
 - **Infra/DevOps**: Docker, Docker Compose
 - **Observabilidade**: Winston (Logs estruturados)
 
-## 🚀 Como Executar Localmente
 
-### 1. Pré-requisitos
-- Node.js (v18 ou v20)
-- Docker e Docker Compose instalados
+## 📸 Interface e Uso 
 
-### 2. Instalação e Banco de Dados
-Clone o repositório e instale as dependências.
-```bash
-npm install
-```
+Toda a interação com o sistema é facilitada por uma interface limpa e documentada interativamente via **Swagger**. É por ela que os desenvolvedores e clientes interagem com a API.
 
-Suba a infraestrutura base (Postgres e RabbitMQ) através do Docker Compose:
-```bash
-docker-compose up -d
-```
+### Tela Principal e Autenticação
+<p align="center">
+<img src="./screenshots/tela-principal.png">
+</p>
 
-Realize as migrations e gere o client do Prisma, e em seguida compile os pacotes compartilhados:
-```bash
-npm run db:push --workspace=@task-system/prisma
-npm run db:generate --workspace=@task-system/prisma
-npm run build
-```
+### Cadastrando e Logando Usuários
+O sistema possui rotas seguras para registro e login. O JWT (JSON Web Token) garante que apenas usuários autenticados consigam disparar novas tarefas.
+<p align="center">
+<img src="./screenshots/login.png">
+</p>
 
-### 3. Executando os Serviços
-Em um terminal, inicie o **API Gateway**:
-```bash
-npm run dev --workspace=@task-system/gateway
-```
-*(Rodando em `http://localhost:3000`)*
+### Enviando uma Nova Tarefa
+Ao enviar uma tarefa, a API responde instantaneamente (Código `201 Created` / `202 Accepted`) com o Status `PENDING`, provando que o usuário não fica bloqueado.
 
-Em um segundo terminal, inicie o **Worker**:
-```bash
-npm run dev --workspace=@task-system/worker
-```
-
-## 🧪 Como Testar e Exemplos de Uso
-
-Acesse a interface visual interativa do **Swagger** em `http://localhost:3000/api-docs` após ligar o Gateway, ou utilize os comandos abaixo:
-
-### 1. Criando um Usuário
-```bash
-curl -X POST http://localhost:3000/api/users/register \
--H "Content-Type: application/json" \
--d '{"name": "Emanuel Oliveira Santos", "email": "teste@email.com", "password": "password123"}'
-```
-
-### 2. Fazendo Login (Pegue o Token)
-```bash
-curl -X POST http://localhost:3000/api/users/login \
--H "Content-Type: application/json" \
--d '{"email": "teste@email.com", "password": "password123"}'
-```
-
-### 3. Enviando uma Tarefa (Assíncrona)
-Substitua `<SEU_TOKEN>` pelo token recebido:
-```bash
-curl -X POST http://localhost:3000/api/tasks \
--H "Content-Type: application/json" \
--H "Authorization: Bearer <SEU_TOKEN>" \
--d '{"title": "Processar Fatura 9912", "payload": {"amount": 1500}}'
-```
-
-### 4. Depurando o Worker
-Observe o terminal onde o Worker está rodando. Ele indicará `📥 Aguardando mensagens`, processará a fatura por 3 segundos e finalizará como `COMPLETED` (ou `FAILED` em simulação de erro de timeout).
-No banco de dados, a tabela `TaskLog` conterá todo o rastro de auditoria da tarefa.
-
-## 📂 Estrutura do Projeto
-
-```
-/
-├── apps/
-│   ├── gateway/         # Express API (Clean Architecture, Controllers)
-│   └── worker/          # Node Consumer (Lógica de processamento pesado)
-├── packages/
-│   ├── prisma/          # Schema do DB e migrações
-│   └── shared/          # Loggers e tipagens compartilhadas
-├── docker-compose.yml   # Infraestrutura de BD e Broker
-└── package.json         # NPM Workspace root
-```
+<p align="center">
+<img src="./screenshots/pending.png">
+</p>
 
 ---
+
+## ⚙️ Como Funciona? (Os Bastidores)
+
+Por baixo do capô, adotamos uma arquitetura robusta de microsserviços baseada em **Filas de Mensageria**.
+
+### 1. API Gateway (O Recepcionista)
+A primeira barreira do sistema. Construído em **Node.js (Express)**, ele autentica o usuário, grava a intenção no banco de dados (PostgreSQL via Prisma) e envia um *"Aviso de Trabalho"* para o nosso mensageiro.
+
+### 2. RabbitMQ (O Mensageiro)
+Usamos o **RabbitMQ** como intermediário (Broker). Ele mantém uma fila extremamente organizada e resiliente de tarefas. Mesmo que o sistema inteiro caia, as mensagens são persistidas e não se perdem.
+
+### 3. Worker (O Operário)
+O Worker é um serviço totalmente separado que fica "escutando" a fila do RabbitMQ. 
+- Ele puxa as tarefas uma por uma (evitando sobrecarga na memória).
+- Muda o status da tarefa no banco de dados para `PROCESSING`.
+- Realiza o trabalho pesado e simulado.
+- Grava todos os passos em uma tabela de **Logs de Auditoria**, permitindo rastreabilidade total de onde e quando a tarefa passou.
+- Atualiza para `COMPLETED` (ou `FAILED`, caso o processamento falhe).
+
+### Logs e Auditoria no Terminal do Worker
+O Worker gera logs em tempo real que facilitam a observabilidade e auditoria, provando a natureza assíncrona do fluxo.
+
+<p align="center">
+<img src="./screenshots/worker.png">
+</p>
+
+---
+
+## 🌟 Principais Benefícios desta Arquitetura
+
+- **Alta Disponibilidade**: Se o Worker cair, o RabbitMQ segura as mensagens até ele voltar.
+- **Escalabilidade Horizontal**: O trabalho está lento? Basta ligar 5, 10 ou 100 cópias do "Worker". Todos consumirão a mesma fila cooperativamente, dividindo o peso!
+- **Desacoplamento**: O Gateway que atende o usuário e o Worker que processa o dado não se conhecem, eles apenas confiam no RabbitMQ, mantendo o sistema seguro contra falhas em cascata.
+
 *Desenvolvido por Emanuel Oliveira Santos como demonstração de Arquitetura de Software.*
