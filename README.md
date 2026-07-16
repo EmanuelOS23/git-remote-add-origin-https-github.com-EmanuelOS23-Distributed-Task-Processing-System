@@ -54,24 +54,6 @@ Ao enviar uma tarefa, a API responde instantaneamente (Código `201 Created` / `
 
 ---
 
-## ⚙️ Como Funciona? (Os Bastidores)
-
-Por baixo do capô, adotamos uma arquitetura robusta de microsserviços baseada em **Filas de Mensageria**.
-
-### 1. API Gateway (O Recepcionista)
-A primeira barreira do sistema. Construído em **Node.js (Express)**, ele autentica o usuário, grava a intenção no banco de dados (PostgreSQL via Prisma) e envia um *"Aviso de Trabalho"* para o nosso mensageiro.
-
-### 2. RabbitMQ (O Mensageiro)
-Usamos o **RabbitMQ** como intermediário (Broker). Ele mantém uma fila extremamente organizada e resiliente de tarefas. Mesmo que o sistema inteiro caia, as mensagens são persistidas e não se perdem.
-
-### 3. Worker (O Operário)
-O Worker é um serviço totalmente separado que fica "escutando" a fila do RabbitMQ. 
-- Ele puxa as tarefas uma por uma (evitando sobrecarga na memória).
-- Muda o status da tarefa no banco de dados para `PROCESSING`.
-- Realiza o trabalho pesado e simulado.
-- Grava todos os passos em uma tabela de **Logs de Auditoria**, permitindo rastreabilidade total de onde e quando a tarefa passou.
-- Atualiza para `COMPLETED` (ou `FAILED`, caso o processamento falhe).
-
 ### Logs e Auditoria no Terminal do Worker
 O Worker gera logs em tempo real que facilitam a observabilidade e auditoria, provando a natureza assíncrona do fluxo.
 
