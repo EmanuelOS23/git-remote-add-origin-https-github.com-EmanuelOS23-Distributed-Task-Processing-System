@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # PostgreSQL para armazenamento de Usuários, Tarefas e Logs
+  postgres:
+    image: postgres:15-alpine
+    container_name: dts_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin_password
+      POSTGRES_DB: task_system_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d task_system_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RabbitMQ para mensageria assíncrona
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: dts_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # Porta do AMQP (Conexão das APIs)
+      - "15672:15672" # Porta da interface de gerenciamento (UI)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
